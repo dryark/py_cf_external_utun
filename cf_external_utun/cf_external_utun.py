@@ -90,6 +90,7 @@ class ExternalUtun():
         #print( f'calling utunuds with uds={uds_path} and ipv6={ipv6}' )
         self.process = await asyncio.create_subprocess_exec(
             *[self.utunudsPath, self.uds_path, ipv6],
+            stdin=asyncio.subprocess.PIPE, # We open stdin so that utunds will get EOF when we close it
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -101,12 +102,18 @@ class ExternalUtun():
         return self.utun
     
     def down(self) -> None:
-        try:
-            self.process.terminate()
-        except Exception:
-            pass
+        if not self.process:
+            return
         if self.writer:
             self.writer.close()
+
+        # We generally cannot terminate this process explicitly, as it was launched 'suid root', and
+        # we are not root.  It should exit gracefully as we close stdin. (or die for other reasons,
+        # with stdin being closed by the OS)
+        # self.process.terminate()
+        self.process.stdin.close()
+        self.process = None
+        self.writer = None
 
     def __del__(self):
         self.down()
