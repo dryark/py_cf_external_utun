@@ -38,13 +38,12 @@ class ExternalUtun():
         self.loop = None
         self.writer = None
         self.name = ""
-        if 'CFTOOLS' in os.environ:
+        if 'CFUTUNUDS' in os.environ:
+            self.utunudsPath = os.environ['CFUTUNUDS']
+        elif 'CFTOOLS' in os.environ:
             self.utunudsPath = os.environ['CFTOOLS'] + "/utunuds"
         else:
-            if 'CFUTUNUDS' in os.environ:
-                self.utunudsPath = os.environ['CFUTUNUDS']
-            else:
-                self.utunudsPath = "utunuds"
+            self.utunudsPath = "utunuds"
         #self.isup = True
         
     async def handle_stdout(self,stream):
