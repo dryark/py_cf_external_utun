@@ -4,10 +4,29 @@ import asyncio
 import os
 import subprocess
 import time
+import signal
+import struct
+import sys
+
+from socket import (
+    AF_INET6,
+)
 
 from typing import (
     Callable,
 )
+
+
+IPV6_HEADER_SIZE = 40
+UDP_HEADER_SIZE = 8
+
+if sys.platform == 'darwin':
+    UTUN_INET6_HEADER = struct.pack('>I', AF_INET6)
+else:
+    # Ethertype 0x86DD :  Internet Protocol Version 6 (IPv6)
+    UTUN_INET6_HEADER = b'\x00\x00\x86\xdd'
+
+UTUN_INET6_HEADER_SIZE = len(UTUN_INET6_HEADER)
 
 class ExternalUtun():
     def __init__(self):
@@ -54,12 +73,50 @@ class ExternalUtun():
     async def handle_uds_client(self,reader, writer):
         #print('uds client begin')
         self.writer = writer
+
+        def fail(reason):
+            print(reason + ".  Generating SIGINT to shut down.")
+            os.kill(os.getpid(), signal.SIGINT)
+
         while True:
-            data = await reader.read(1500)
-            if not data:
+            try:
+                # We need to deliver each IPV6 frame as a single unit to be passed to the quic
+                # tunnel.  Our frames may be interleaved with other quic data (for example,
+                # a quic "ping"), so if we just try to delivery what we read here as a binary
+                # blob, we'll encounter random failures.
+                #
+                # In the case of simply reading a binary stream here, we may also introduce MTU
+                # issues by reading several IPV6 packets at once, even if all of the data was otherwise
+                # passed without mangling or interruption.
+                #
+                # It seems a little circuitous, but we strip the UTUN_INET6_HEADER here, the
+                # remaining IPV6 frame gets passed around as a Datagram, before the UTUN_INET6_HEADER
+                # gets stuck back on before being pushed down the wire...
+
+                # Note: readexactly() wiil raise IncompleteReadError if the reader is closed.
+                datagram_type = await reader.readexactly(UTUN_INET6_HEADER_SIZE)
+
+                # If someone dumps garbage into the tunnel, we really have no way to recover
+                if datagram_type != UTUN_INET6_HEADER:
+                    fail("Read non-IPV6 data from unix domain socket.")
+                    break
+
+                ipv6_header = await reader.readexactly(IPV6_HEADER_SIZE)
+                ipv6_length = struct.unpack('>H', ipv6_header[4:6])[0]
+                ipv6_body = await reader.readexactly(ipv6_length)
+
+                # Our current callback immediately strips "datagram_type".  We could just leave
+                # it off here, since we currently support only IPv6.  But perhaps some other message
+                # type may be needed in the future, so for consistency, for now, we'll just pass it along.
+                # (If this library is used more generically, the IPV6 limitation could be expanded)
+                data = datagram_type + ipv6_header + ipv6_body
+                # print("Read %d bytes from reader. Decoded size is %d" % (len(data), ipv6_length) )
+                await self.callback(data)
+            except Exception as e:
+                fail("Exception encountered reading from unix domain socket. " + repr(e))
                 break
-            await self.callback(data)
-        writer.close()
+        if self.writer:
+            writer.close()
     
     async def start_uds( self, path ):
         await asyncio.start_unix_server( self.handle_uds_client, path=path )
