@@ -45,6 +45,7 @@ class ExternalUtun():
         else:
             self.utunudsPath = "utunuds"
         #self.isup = True
+        self._writer_ready = asyncio.Event()
         
     async def handle_stdout(self,stream):
         print('Starting to read from process')
@@ -72,6 +73,7 @@ class ExternalUtun():
     async def handle_uds_client(self,reader, writer):
         #print('uds client begin')
         self.writer = writer
+        self._writer_ready.set()  # Signal that the writer is ready
 
         def fail(reason):
             print(reason + ".  Generating SIGINT to shut down.")
@@ -81,7 +83,7 @@ class ExternalUtun():
             try:
                 # We need to deliver each IPV6 frame as a single unit to be passed to the quic
                 # tunnel.  Our frames may be interleaved with other quic data (for example,
-                # a quic "ping"), so if we just try to delivery what we read here as a binary
+                # a quic "ping"), so if we just try to deliver what we read here as a binary
                 # blob, we'll encounter random failures.
                 #
                 # In the case of simply reading a binary stream here, we may also introduce MTU
@@ -150,6 +152,14 @@ class ExternalUtun():
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+
+        # This fixes a race condition. We're not really "up" until we can write data to the
+        # tunnel (see .writer initialization in handle_uds_client).  Otherwise, we risk being
+        # asked to send data that we cannot forward. (triggering "UDS not established or already closed.")
+        try:
+            await asyncio.wait_for(self._writer_ready.wait(), 3.0)
+        except asyncio.TimeoutError:
+            print("Failed to initialize unix domain socket connection")
         
         #loop = asyncio.get_event_loop()
         #loop.create_task( self.handle_stdout( self.process.stdout ) )
