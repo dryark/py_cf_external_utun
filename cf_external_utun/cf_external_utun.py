@@ -51,11 +51,11 @@ class ExternalUtun():
         print('Starting to read from process')
         while True:
             line = await stream.readline()
-            line = line.decode('utf-8')
-            #line = line.replace('-', '  ')
+            #line = line.decode('utf-8')
+            ##line = line.replace('-', '  ')
             if not line:
                 break
-            print("Utunuds:", line )  # Debugging output
+            # print("Utunuds:", line )  # Debugging output
             #if line.startswith('utun:') and self.utun is None:
             #    self.utun = line.strip().split('utun:')[1]
             #    self.name = self.utun
@@ -163,9 +163,9 @@ class ExternalUtun():
         except asyncio.TimeoutError:
             print("Failed to initialize unix domain socket connection")
         
-        loop = asyncio.get_event_loop()
-        loop.create_task( self.handle_stdout( self.process.stdout ) )
-        loop.create_task( self.handle_stdout( self.process.stderr ) )
+        #loop = asyncio.get_event_loop()
+        #loop.create_task( self.handle_stdout( self.process.stdout ) )
+        #loop.create_task( self.handle_stdout( self.process.stderr ) )
         
         return self.utun
     
